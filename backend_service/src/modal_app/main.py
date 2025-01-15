@@ -127,7 +127,7 @@ async def ask_discord(request: Request):
 
         # 3) If approach == 'rag', do the existing similarity_search
         if approach == "rag":
-            rag_data = await similarity_search(user_query)
+            rag_data = similarity_search(user_query)
             messages.append(
                 {
                     "tool_call_id": tool_call.id,
@@ -140,10 +140,10 @@ async def ask_discord(request: Request):
                 model="gpt-4o",
                 messages=messages,
             )
+            messages.append(final_response.choices[0].message)
             return {
                 "answer": final_response.choices[0].message.content,
-                "chat_history": messages,
-                "final_response": final_response
+                "chat_history": messages
             }
 
         # 4) If approach == 'sql', let's run the sql_query
@@ -166,10 +166,10 @@ async def ask_discord(request: Request):
                 model="gpt-4o",
                 messages=messages,
             )
+            messages.append(final_response.choices[0].message)
             return {
                 "answer": final_response.choices[0].message.content,
                 "chat_history": messages,
-                "final_response": final_response
             }
 
 
@@ -190,8 +190,8 @@ async def scrape_server(guild_id: str, limit: int = DEFAULT_LIMIT):
     volume.commit()
     return {"status": "ok", "message": f"Scraped guild_id={guild_id}, limit={limit}"}
 
-@fastapi_app.get("/query/{message}")
-async def similarity_search(message: str, top_k: int = 15):
+# @fastapi_app.get("/query/{message}")
+def similarity_search(message: str, top_k: int = 15):
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     conn = get_db_conn(DB_PATH)
     cursor = conn.cursor()
@@ -215,6 +215,7 @@ async def similarity_search(message: str, top_k: int = 15):
             """,
             [query_bytes, top_k],
         ).fetchall()
+    conn.close()
 
     return results
 
@@ -230,6 +231,7 @@ def do_sql_query(sql_query: str):
 
     try:
         rows = cursor.execute(sql_query).fetchall()
+        conn.close()
         return {
             "answer": f"SQL Query Results: {rows}",
             "approach": "sql",
