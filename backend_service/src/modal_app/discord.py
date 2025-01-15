@@ -30,15 +30,6 @@ def fetch_and_store_channel_messages(channel_id: str, headers: Dict, limit: int 
             content = msg["content"]
             timestamp = msg["timestamp"]  # e.g. '2025-01-01T00:00:00.000000+00:00'
 
-            # row = {
-            #     "id": message_id,
-            #     "channel_id": channel_id,
-            #     "author_id": author_id,
-            #     "content": content,
-            #     "timestamp": timestamp,
-            #     "embdding": embedding
-            # }
-            # print(row)
 
             # Insert or ignore if row already exists
             cursor.execute(

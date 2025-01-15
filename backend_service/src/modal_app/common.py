@@ -9,6 +9,33 @@ import struct
 from typing import List
 
 
+
+# AI CONSTANTS
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "decide_approach",
+            "description": "Decide whether to use similarity search (RAG) or to run a SQL query over the DB.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "approach": {
+                        "type": "string",
+                        "enum": ["rag", "sql"],
+                        "description": "Which approach to use? 'rag' or 'sql'."
+                    },
+                    "sql_query": {
+                        "type": "string",
+                        "description": "If 'sql' approach, the SQL to be executed."
+                    }
+                },
+                "required": ["approach"]
+            }
+        },
+    },
+]
+
 #Discord CONSTANTS
 DEFAULT_LIMIT = 50
 
@@ -17,38 +44,6 @@ DB_FILENAME = "discord_messages.db"
 VOLUME_DIR = "/cache-vol"
 DB_PATH = pathlib.Path(VOLUME_DIR, DB_FILENAME)
 
-#CHROMA CONSTANTS
-# CHROMA_DIR = "chroma"
-# CHROMA_PATH = pathlib.Path(VOLUME_DIR, CHROMA_DIR)
-
-
-#SQLITE CONSTANTS
-# SQLITE_VERSION = "3420000"  # e.g. 3.42.0 => "3420000" on sqlite.org
-# SQLITE_TARBALL = f"sqlite-autoconf-{SQLITE_VERSION}.tar.gz"
-# SQLITE_URL = f"https://www.sqlite.org/2023/{SQLITE_TARBALL}"
-
-# Example of building a custom image
-# custom_image = (
-#     Image.debian_slim(python_version="3.12")
-#     # 1) Install build tools
-#     .run_commands(
-#         [
-#             "apt-get update && apt-get install -y build-essential wget ca-certificates",
-#             "rm -rf /var/lib/apt/lists/*"
-#         ]
-#     )
-#     # 2) Download + compile SQLite from source
-#     .run_commands(
-#         [
-#             f"wget {SQLITE_URL}",
-#             f"tar xvfz {SQLITE_TARBALL}",
-#             f"cd sqlite-autoconf-{SQLITE_VERSION} && ./configure --prefix=/usr/local && make && make install",
-#             "ldconfig",  # refresh shared library cache
-#         ]
-#     )
-#     # 3) Now that we have a new libsqlite3, let's install our Python deps
-#     .pip_install_from_pyproject("pyproject.toml")
-# )
 
 volume = Volume.from_name("sqlite-db-vol", create_if_missing=True)
 image = Image.debian_slim().pip_install_from_pyproject("pyproject.toml")
