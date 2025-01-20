@@ -6,13 +6,21 @@ readme = "README.md"
 authors = [
     { name = "nheingit", email = "60185486+nheingit@users.noreply.github.com" }
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.6",
+    "ftfy>=6.3.1",
     "modal>=0.72.7",
+    "numpy>=2.2.2",
     "openai>=1.59.9",
+    "pillow>=11.1.0",
+    "pydantic>=2.10.5",
     "python-dotenv>=1.0.1",
     "python-multipart>=0.0.20",
+    "regex>=2024.11.6",
+    "sentence-transformers>=3.3.1",
+    "torch>=2.5.1",
+    "tqdm>=4.67.1",
 ]
 
 [project.scripts]
