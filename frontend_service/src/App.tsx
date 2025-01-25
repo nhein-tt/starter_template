@@ -1,422 +1,577 @@
-import React, { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Toaster } from "@/components/ui/toaster";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Progress } from "@/components/ui/progress";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+} from "recharts";
 
-function MultiModalApp() {
+interface EvaluationResult {
+  prompt: string;
+  image_url: string;
+  similarity_score: number;
+  quality_rating: string;
+  feedback: string;
+}
+
+interface BatchMetrics {
+  avg_similarity_score: number;
+  rating_distribution: { [key: string]: number };
+}
+
+interface BatchListItem {
+  batch_id: string;
+  description?: string;
+  timestamp: string;
+  image_count: number;
+}
+
+interface EvaluationResponse {
+  batch_id: string;
+  description?: string;
+  timestamp: string;
+  prompts: string[];
+  metrics: BatchMetrics;
+  results: EvaluationResult[];
+}
+
+function EvaluationVisualization() {
+  const [batches, setBatches] = useState<BatchListItem[]>([]);
+  const [selectedBatch, setSelectedBatch] = useState<EvaluationResponse | null>(
+    null,
+  );
   const { toast } = useToast();
   const modalUrl = import.meta.env.VITE_MODAL_URL;
 
-  // State for microphone selection
-  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  useEffect(() => {
+    fetchBatches();
+  }, []);
 
-  // State for audio recording
-  const [isRecording, setIsRecording] = useState(false);
-  const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
-  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
-  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
-
-  // Processing states
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [currentStep, setCurrentStep] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
-
-  // Result states
-  const [transcript, setTranscript] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [similarityScore, setSimilarityScore] = useState<number | null>(null);
-  const [imageDescription, setImageDescription] = useState<string>("");
-  const [descriptionAudio, setDescriptionAudio] = useState<string>("");
-
-  // Handle requesting microphone permissions
-  const handleRequestMicPermissions = async () => {
+  const fetchBatches = async () => {
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const microphones = devices.filter((d) => d.kind === "audioinput");
-      setAudioDevices(microphones);
-
-      if (microphones.length > 0) {
-        setSelectedDeviceId(microphones[0].deviceId);
-      } else {
-        toast({
-          title: "No Microphones",
-          description: "No microphone devices were found.",
-          variant: "destructive",
-        });
+      const response = await fetch(`${modalUrl}/evaluation_batches`);
+      if (!response.ok) throw new Error("Failed to fetch batches");
+      const data = await response.json();
+      setBatches(data);
+      if (data.length > 0) {
+        await fetchBatchDetails(data[0].batch_id);
       }
-    } catch (err: any) {
+    } catch (error) {
       toast({
-        title: "Permission Error",
-        description:
-          err.name === "NotAllowedError"
-            ? "Microphone permission was denied."
-            : `Error: ${err.message}`,
         variant: "destructive",
+        description: "Failed to fetch evaluation batches",
       });
-      console.error("Error requesting mic permission:", err);
     }
   };
 
-  // Handle recording start
-  const handleStartRecording = async () => {
+  const fetchBatchDetails = async (batchId: string) => {
     try {
-      if (!selectedDeviceId) {
-        toast({
-          title: "No Microphone",
-          description: "Please select a microphone first.",
-          variant: "destructive",
-        });
-        return;
+      const response = await fetch(`${modalUrl}/evaluation/${batchId}`);
+      if (!response.ok) {
+        console.error("Batch fetch error:", await response.text());
+        throw new Error("Failed to fetch batch details");
       }
-
-      const constraints = {
-        audio: {
-          deviceId: { exact: selectedDeviceId },
-        },
-      };
-
-      const mimeType = "audio/webm; codecs=opus";
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        toast({
-          title: "Browser Not Supported",
-          description: "Your browser doesn't support WebM with Opus codec.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      const newRecorder = new MediaRecorder(stream, { mimeType });
-
-      // Clear previous recording data
-      setAudioChunks([]);
-      setRecordedBlob(null);
-
-      let chunks: Blob[] = [];
-      newRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
-
-      newRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: mimeType });
-        setRecordedBlob(blob);
-        setAudioChunks(chunks);
-        stream.getTracks().forEach((track) => track.stop());
-      };
-
-      newRecorder.start(1000);
-      setRecorder(newRecorder);
-      setIsRecording(true);
-
+      const data = await response.json();
+      setSelectedBatch(data);
+    } catch (error) {
+      console.error("Batch fetch error:", error);
       toast({
-        title: "Recording Started",
-        description: "Speak your prompt clearly into the microphone.",
-      });
-    } catch (err: any) {
-      console.error("Error starting recording:", err);
-      toast({
-        title: "Recording Error",
-        description: err.message,
         variant: "destructive",
+        description: "Failed to fetch batch details",
       });
     }
   };
 
-  // Handle recording stop
-  const handleStopRecording = () => {
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
-      setIsRecording(false);
-      toast({
-        title: "Recording Complete",
-        description: "You can now process your recording.",
-      });
-    }
+  const formatDistributionData = (distribution: { [key: string]: number }) => {
+    return Object.entries(distribution).map(([rating, count]) => ({
+      rating,
+      count,
+    }));
   };
 
-  // Process the full flow
-  const handleProcessFlow = async () => {
-    if (!recordedBlob) {
-      toast({
-        title: "No Recording",
-        description: "Please record some audio first.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsProcessing(true);
-    setProgress(0);
-
-    try {
-      // Step 1: Transcribe audio
-      setCurrentStep("transcribing");
-      setProgress(20);
-
-      const formData = new FormData();
-      formData.append("file", recordedBlob, "recording.webm");
-
-      const transcriptResponse = await fetch(`${modalUrl}/transcribe`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!transcriptResponse.ok) {
-        const error = await transcriptResponse.json();
-        throw new Error(error.detail || "Failed to transcribe audio");
-      }
-
-      const transcriptData = await transcriptResponse.json();
-      setTranscript(transcriptData.transcript);
-      setProgress(40);
-
-      // Step 2: Generate image
-      setCurrentStep("generating");
-      const imageResponse = await fetch(`${modalUrl}/generate_image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: transcriptData.transcript }),
-      });
-
-      if (!imageResponse.ok) {
-        const error = await imageResponse.json();
-        throw new Error(error.detail || "Failed to generate image");
-      }
-
-      const imageData = await imageResponse.json();
-      setImageUrl(imageData.image_url);
-      setProgress(60);
-
-      // Step 3: Analyze image similarity
-      setCurrentStep("analyzing");
-      const analysisResponse = await fetch(
-        `${modalUrl}/analyze_image_similarity`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: transcriptData.transcript,
-            image_url: imageData.image_url,
-          }),
-        },
-      );
-
-      if (!analysisResponse.ok) {
-        const error = await analysisResponse.json();
-        throw new Error(error.detail || "Failed to analyze image");
-      }
-
-      const analysisData = await analysisResponse.json();
-      setSimilarityScore(analysisData.similarity_score);
-      setImageDescription(analysisData.image_description);
-      setProgress(80);
-
-      // Step 4: Generate audio description
-      setCurrentStep("speaking");
-      if (analysisData.image_description) {
-        const ttsResponse = await fetch(`${modalUrl}/text_to_speech`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: analysisData.image_description }),
-        });
-
-        if (!ttsResponse.ok) {
-          const error = await ttsResponse.json();
-          throw new Error(error.detail || "Failed to convert text to speech");
-        }
-
-        const ttsData = await ttsResponse.json();
-        setDescriptionAudio(ttsData.audio);
-      }
-
-      setProgress(100);
-      toast({
-        title: "Processing Complete",
-        description: "All steps have been completed successfully.",
-      });
-    } catch (error: any) {
-      console.error("Processing error:", error);
-      toast({
-        title: "Processing Error",
-        description: error.message || "An error occurred during processing",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-      setCurrentStep(null);
-    }
-  };
-
-  const getStepDescription = () => {
-    switch (currentStep) {
-      case "transcribing":
-        return "Transcribing your audio...";
-      case "generating":
-        return "Generating an image from your description...";
-      case "analyzing":
-        return "Analyzing the generated image...";
-      case "speaking":
-        return "Creating audio description...";
-      default:
-        return "";
-    }
+  const formatSimilarityData = (results: EvaluationResult[]) => {
+    return results.map((result, index) => ({
+      index: index + 1,
+      score: result.similarity_score,
+      prompt: result.prompt,
+    }));
   };
 
   return (
-    <div className="container mx-auto p-4 max-w-4xl">
-      <Card className="mb-8">
-        <CardContent className="pt-6">
-          <h1 className="text-2xl font-bold mb-6">Multi-Modal AI Demo</h1>
-
-          {/* Microphone Setup Section */}
-          <div className="space-y-4 mb-8">
-            <h2 className="text-xl font-semibold">Microphone Setup</h2>
-            <Button
-              variant="outline"
-              onClick={handleRequestMicPermissions}
-              className="w-full sm:w-auto"
-            >
-              Request Microphone Permissions
-            </Button>
-            <div className="mt-2">
-              <label
-                htmlFor="mic-select"
-                className="block text-sm text-gray-600 mb-2"
-              >
-                Choose Microphone:
-              </label>
-              <select
-                id="mic-select"
-                className="w-full rounded-md border border-gray-300 shadow-sm p-2"
-                value={selectedDeviceId ?? ""}
-                onChange={(e) => setSelectedDeviceId(e.target.value)}
-              >
-                <option value="">Select a microphone...</option>
-                {audioDevices.map((device) => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.label ||
-                      `Microphone ${device.deviceId.slice(0, 8)}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Recording Controls */}
-          <div className="space-y-4 mb-8">
-            <h2 className="text-xl font-semibold">Record Your Prompt</h2>
-            <div className="flex gap-2 flex-wrap">
-              {!isRecording ? (
-                <Button
-                  onClick={handleStartRecording}
-                  disabled={!selectedDeviceId || isProcessing}
-                  className="w-full sm:w-auto"
-                >
-                  Start Recording
-                </Button>
-              ) : (
-                <Button
-                  variant="destructive"
-                  onClick={handleStopRecording}
-                  className="w-full sm:w-auto"
-                >
-                  Stop Recording
-                </Button>
-              )}
-
-              {recordedBlob && (
-                <>
-                  <div className="w-full">
-                    <audio
-                      controls
-                      src={URL.createObjectURL(recordedBlob)}
-                      className="w-full mt-2"
-                    />
-                  </div>
-                  <Button
-                    onClick={handleProcessFlow}
-                    disabled={isRecording || isProcessing}
-                    className="w-full sm:w-auto"
-                  >
-                    Process Recording
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Processing Progress */}
-          {isProcessing && (
-            <div className="space-y-2 mb-8">
-              <div className="flex justify-between text-sm">
-                <span>{getStepDescription()}</span>
-                <span>{progress}%</span>
-              </div>
-              <Progress value={progress} className="w-full" />
-            </div>
-          )}
-
-          {/* Results Display */}
-          {transcript && (
-            <div className="space-y-4 mb-8">
-              <h2 className="text-xl font-semibold">Results</h2>
-
-              <div className="space-y-2">
-                <h3 className="font-semibold">Your Prompt:</h3>
-                <p className="text-gray-700 bg-gray-50 p-4 rounded-lg">
-                  {transcript}
-                </p>
-              </div>
-
-              {imageUrl && (
-                <div className="space-y-2">
-                  <h3 className="font-semibold">Generated Image:</h3>
-                  <img
-                    src={imageUrl}
-                    alt="AI Generated"
-                    className="w-full max-w-2xl rounded-lg shadow-lg"
-                  />
-                  {similarityScore !== null &&
-                    typeof similarityScore === "number" && (
-                      <p className="text-sm text-gray-600">
-                        Similarity to prompt: {similarityScore.toFixed(1)}%
-                      </p>
-                    )}
-                </div>
-              )}
-
-              {imageDescription && (
-                <div className="space-y-2">
-                  <h3 className="font-semibold">AI Vision Analysis:</h3>
-                  <p className="text-gray-700 bg-gray-50 p-4 rounded-lg">
-                    {imageDescription}
-                  </p>
-                  {descriptionAudio && (
-                    <div className="mt-4">
-                      <h4 className="font-semibold mb-2">Audio Description:</h4>
-                      <audio
-                        controls
-                        src={`data:audio/mp3;base64,${descriptionAudio}`}
-                        className="w-full"
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+    <div className="container mx-auto p-4 space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Evaluation Results Dashboard</CardTitle>
+          <CardDescription>
+            View and analyze image generation evaluation results
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Select onValueChange={(value) => fetchBatchDetails(value)}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select evaluation batch" />
+            </SelectTrigger>
+            <SelectContent>
+              {batches.map((batch) => (
+                <SelectItem key={batch.batch_id} value={batch.batch_id}>
+                  Batch ({batch.image_count} images) -{" "}
+                  {new Date(batch.timestamp).toLocaleDateString()}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </CardContent>
       </Card>
 
-      <Toaster />
+      {selectedBatch && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              {selectedBatch.description || "Batch Results"}
+            </CardTitle>
+            <CardDescription>
+              Batch ID: {selectedBatch.batch_id}
+              <br />
+              Run on: {new Date(selectedBatch.timestamp).toLocaleString()}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue="overview">
+              <TabsList>
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="prompts">Prompts</TabsTrigger>
+                <TabsTrigger value="metrics">Detailed Metrics</TabsTrigger>
+                <TabsTrigger value="gallery">Image Gallery</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="prompts">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Evaluation Prompts</CardTitle>
+                    <CardDescription>
+                      Prompts used in this evaluation batch
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {selectedBatch.prompts.map((prompt, index) => (
+                        <div
+                          key={index}
+                          className="p-4 rounded-lg bg-secondary"
+                        >
+                          <p className="font-mono text-sm">{prompt}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="overview">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Average Similarity Score</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-4xl font-bold text-center">
+                        {selectedBatch.metrics.avg_similarity_score.toFixed(2)}%
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Quality Distribution</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="h-48">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={formatDistributionData(
+                              selectedBatch.metrics.rating_distribution,
+                            )}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="rating" />
+                            <YAxis />
+                            <Tooltip />
+                            <Bar dataKey="count" fill="#8884d8" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="metrics">
+                <div className="space-y-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Similarity Scores by Generation</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart
+                            data={formatSimilarityData(selectedBatch.results)}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="index" />
+                            <YAxis domain={[0, 100]} />
+                            <Tooltip />
+                            <Line
+                              type="monotone"
+                              dataKey="score"
+                              stroke="#8884d8"
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="gallery">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {selectedBatch.results.map((result, index) => (
+                    <Card key={index}>
+                      <CardContent className="p-4">
+                        <img
+                          src={result.image_url}
+                          alt={`Generated image ${index + 1}`}
+                          className="w-full h-48 object-cover rounded mb-2"
+                        />
+                        <div className="space-y-2">
+                          <p
+                            className="font-medium truncate"
+                            title={result.prompt}
+                          >
+                            Prompt: {result.prompt}
+                          </p>
+                          <div className="flex justify-between text-sm">
+                            <span>
+                              Similarity: {result.similarity_score.toFixed(2)}%
+                            </span>
+                            <span>Quality: {result.quality_rating}</span>
+                          </div>
+                          <p
+                            className="text-sm mt-2 line-clamp-3"
+                            title={result.feedback}
+                          >
+                            {result.feedback}
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
 
-export default MultiModalApp;
+export default EvaluationVisualization;
+// import { useState, useEffect } from "react";
+// import { useToast } from "@/hooks/use-toast";
+// import {
+//   Card,
+//   CardContent,
+//   CardDescription,
+//   CardHeader,
+//   CardTitle,
+// } from "@/components/ui/card";
+// import {
+//   Select,
+//   SelectContent,
+//   SelectItem,
+//   SelectTrigger,
+//   SelectValue,
+// } from "@/components/ui/select";
+// import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+// import {
+//   BarChart,
+//   Bar,
+//   XAxis,
+//   YAxis,
+//   CartesianGrid,
+//   Tooltip,
+//   ResponsiveContainer,
+//   LineChart,
+//   Line,
+// } from "recharts";
+//
+// interface EvaluationResult {
+//   prompt: string;
+//   image_url: string;
+//   similarity_score: number;
+//   quality_rating: string;
+//   feedback: string;
+// }
+//
+// interface BatchMetrics {
+//   avg_similarity_score: number;
+//   rating_distribution: { [key: string]: number };
+// }
+//
+// interface BatchListItem {
+//   batch_id: string;
+//   description?: string;
+//   timestamp: string;
+//   image_count: number;
+// }
+//
+// interface EvaluationResponse {
+//   batch_id: string;
+//   description?: string;
+//   timestamp: string;
+//   metrics: BatchMetrics;
+//   results: EvaluationResult[];
+// }
+//
+// function EvaluationVisualization() {
+//   const [batches, setBatches] = useState<BatchListItem[]>([]);
+//   const [selectedBatch, setSelectedBatch] = useState<EvaluationResponse | null>(
+//     null,
+//   );
+//   const { toast } = useToast();
+//   const modalUrl = import.meta.env.VITE_MODAL_URL;
+//
+//   useEffect(() => {
+//     fetchBatches();
+//   }, []);
+//
+//   const fetchBatches = async () => {
+//     try {
+//       const response = await fetch(`${modalUrl}/evaluation_batches`);
+//       if (!response.ok) throw new Error("Failed to fetch batches");
+//       const data = await response.json();
+//       setBatches(data);
+//       if (data.length > 0) {
+//         await fetchBatchDetails(data[0].batch_id);
+//       }
+//     } catch (error) {
+//       toast({
+//         variant: "destructive",
+//         description: "Failed to fetch evaluation batches",
+//       });
+//     }
+//   };
+//
+//   const fetchBatchDetails = async (batchId: string) => {
+//     try {
+//       const response = await fetch(`${modalUrl}/evaluation/${batchId}`);
+//       if (!response.ok) {
+//         console.error("Batch fetch error:", await response.text());
+//         throw new Error("Failed to fetch batch details");
+//       }
+//       const data = await response.json();
+//       setSelectedBatch(data);
+//     } catch (error) {
+//       console.error("Batch fetch error:", error);
+//       toast({
+//         variant: "destructive",
+//         description: "Failed to fetch batch details",
+//       });
+//     }
+//   };
+//
+//   const formatDistributionData = (distribution: { [key: string]: number }) => {
+//     return Object.entries(distribution).map(([rating, count]) => ({
+//       rating,
+//       count,
+//     }));
+//   };
+//
+//   const formatSimilarityData = (results: EvaluationResult[]) => {
+//     return results.map((result, index) => ({
+//       index: index + 1,
+//       score: result.similarity_score,
+//       prompt: result.prompt,
+//     }));
+//   };
+//
+//   return (
+//     <div className="container mx-auto p-4 space-y-6">
+//       <Card>
+//         <CardHeader>
+//           <CardTitle>Evaluation Results Dashboard</CardTitle>
+//           <CardDescription>
+//             View and analyze image generation evaluation results
+//           </CardDescription>
+//         </CardHeader>
+//         <CardContent>
+//           <Select onValueChange={(value) => fetchBatchDetails(value)}>
+//             <SelectTrigger className="w-full">
+//               <SelectValue placeholder="Select evaluation batch" />
+//             </SelectTrigger>
+//             <SelectContent>
+//               {batches.map((batch) => (
+//                 <SelectItem key={batch.batch_id} value={batch.batch_id}>
+//                   Batch ({batch.image_count} images) -{" "}
+//                   {new Date(batch.timestamp).toLocaleDateString()}
+//                 </SelectItem>
+//               ))}
+//             </SelectContent>
+//           </Select>
+//         </CardContent>
+//       </Card>
+//
+//       {selectedBatch && (
+//         <Card>
+//           <CardHeader>
+//             <CardTitle>
+//               {selectedBatch.description || "Batch Results"}
+//             </CardTitle>
+//             <CardDescription>
+//               Batch ID: {selectedBatch.batch_id}
+//               <br />
+//               Run on: {new Date(selectedBatch.timestamp).toLocaleString()}
+//             </CardDescription>
+//           </CardHeader>
+//           <CardContent>
+//             <Tabs defaultValue="overview">
+//               <TabsList>
+//                 <TabsTrigger value="overview">Overview</TabsTrigger>
+//                 <TabsTrigger value="metrics">Detailed Metrics</TabsTrigger>
+//                 <TabsTrigger value="gallery">Image Gallery</TabsTrigger>
+//               </TabsList>
+//
+//               <TabsContent value="overview">
+//                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+//                   <Card>
+//                     <CardHeader>
+//                       <CardTitle>Average Similarity Score</CardTitle>
+//                     </CardHeader>
+//                     <CardContent>
+//                       <div className="text-4xl font-bold text-center">
+//                         {selectedBatch.metrics.avg_similarity_score.toFixed(2)}%
+//                       </div>
+//                     </CardContent>
+//                   </Card>
+//
+//                   <Card>
+//                     <CardHeader>
+//                       <CardTitle>Quality Distribution</CardTitle>
+//                     </CardHeader>
+//                     <CardContent>
+//                       <div className="h-48">
+//                         <ResponsiveContainer width="100%" height="100%">
+//                           <BarChart
+//                             data={formatDistributionData(
+//                               selectedBatch.metrics.rating_distribution,
+//                             )}
+//                           >
+//                             <CartesianGrid strokeDasharray="3 3" />
+//                             <XAxis dataKey="rating" />
+//                             <YAxis />
+//                             <Tooltip />
+//                             <Bar dataKey="count" fill="#8884d8" />
+//                           </BarChart>
+//                         </ResponsiveContainer>
+//                       </div>
+//                     </CardContent>
+//                   </Card>
+//                 </div>
+//               </TabsContent>
+//
+//               <TabsContent value="metrics">
+//                 <div className="space-y-6">
+//                   <Card>
+//                     <CardHeader>
+//                       <CardTitle>Similarity Scores by Generation</CardTitle>
+//                     </CardHeader>
+//                     <CardContent>
+//                       <div className="h-64">
+//                         <ResponsiveContainer width="100%" height="100%">
+//                           <LineChart
+//                             data={formatSimilarityData(selectedBatch.results)}
+//                           >
+//                             <CartesianGrid strokeDasharray="3 3" />
+//                             <XAxis dataKey="index" />
+//                             <YAxis domain={[0, 100]} />
+//                             <Tooltip />
+//                             <Line
+//                               type="monotone"
+//                               dataKey="score"
+//                               stroke="#8884d8"
+//                             />
+//                           </LineChart>
+//                         </ResponsiveContainer>
+//                       </div>
+//                     </CardContent>
+//                   </Card>
+//                 </div>
+//               </TabsContent>
+//
+//               <TabsContent value="gallery">
+//                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+//                   {selectedBatch.results.map((result, index) => (
+//                     <Card key={index}>
+//                       <CardContent className="p-4">
+//                         <img
+//                           src={result.image_url}
+//                           alt={`Generated image ${index + 1}`}
+//                           className="w-full h-48 object-cover rounded mb-2"
+//                         />
+//                         <div className="space-y-2">
+//                           <p
+//                             className="font-medium truncate"
+//                             title={result.prompt}
+//                           >
+//                             Prompt: {result.prompt}
+//                           </p>
+//                           <div className="flex justify-between text-sm">
+//                             <span>
+//                               Similarity: {result.similarity_score.toFixed(2)}%
+//                             </span>
+//                             <span>Quality: {result.quality_rating}</span>
+//                           </div>
+//                           <p
+//                             className="text-sm mt-2 line-clamp-3"
+//                             title={result.feedback}
+//                           >
+//                             {result.feedback}
+//                           </p>
+//                         </div>
+//                       </CardContent>
+//                     </Card>
+//                   ))}
+//                 </div>
+//               </TabsContent>
+//             </Tabs>
+//           </CardContent>
+//         </Card>
+//       )}
+//     </div>
+//   );
+// }
+//
+// export default EvaluationVisualization;
