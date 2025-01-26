@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from modal import App, Image, Secret, Volume
 
-DB_FILENAME = "evals_v2.db"
+DB_FILENAME = "evals_v4.db"
 VOLUME_DIR = "/cache-vol"
 DB_PATH = pathlib.Path(VOLUME_DIR, DB_FILENAME)
 

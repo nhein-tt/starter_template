@@ -17,6 +17,7 @@ from PIL import Image
 from sentence_transformers import SentenceTransformer, util
 
 from .common import DB_PATH, VOLUME_DIR, app, fastapi_app, volume
+from .utils import break_down_prompt, aggregate_issues_by_category
 from .models import (
     BatchMetrics,
     EvaluationRequest,
@@ -25,9 +26,8 @@ from .models import (
     ImageDescriptionRequest,
     ImageGenerationRequest,
     ImageSimilarityRequest,
-    QualityRating,
-    QualityRatingRequest,
-    QualityRatingResponse,
+    ObjectiveRatingRequest,
+    ObjectiveCriteriaResponse,
     TextToSpeechRequest,
 )
 
@@ -75,7 +75,8 @@ def init_db():
         image_data TEXT NOT NULL,
         iteration INTEGER NOT NULL,
         similarity_score REAL,
-        quality_rating TEXT CHECK(quality_rating IN ('MEH', 'FAIR', 'OKAY', 'GOOD', 'GREAT', 'EXCELLENT')),
+        prompt_elements JSON,
+        objective_evaluation JSON,
         llm_feedback TEXT,
         FOREIGN KEY (batch_id) REFERENCES evaluation_batches(batch_id),
         FOREIGN KEY (prompt_id) REFERENCES test_prompts(prompt_id)
@@ -212,99 +213,83 @@ async def get_evaluation_results(batch_id: str):
                 SELECT description, timestamp
                 FROM evaluation_batches
                 WHERE batch_id = ?
-            """,
-                (batch_id,),
+                """,
+                (batch_id,)
             ).fetchone()
 
             if not batch:
                 raise HTTPException(status_code=404, detail="Batch not found")
 
-            prompts = conn.execute(
-                """
-                            SELECT DISTINCT prompt_text
-                            FROM generated_images
-                            WHERE batch_id = ?
-                            ORDER BY prompt_text
-                        """,
-                (batch_id,),
-            ).fetchall()
-
-            # Calculate metrics directly from generated_images
-            metrics = conn.execute(
-                """
-                SELECT
-                    AVG(similarity_score) as avg_similarity_score,
-                    JSON_OBJECT(
-                        'MEH', SUM(CASE WHEN quality_rating = 'MEH' THEN 1 ELSE 0 END),
-                        'FAIR', SUM(CASE WHEN quality_rating = 'FAIR' THEN 1 ELSE 0 END),
-                        'OKAY', SUM(CASE WHEN quality_rating = 'OKAY' THEN 1 ELSE 0 END),
-                        'GOOD', SUM(CASE WHEN quality_rating = 'GOOD' THEN 1 ELSE 0 END),
-                        'GREAT', SUM(CASE WHEN quality_rating = 'GREAT' THEN 1 ELSE 0 END),
-                        'EXCELLENT', SUM(CASE WHEN quality_rating = 'EXCELLENT' THEN 1 ELSE 0 END)
-                    ) as rating_distribution
-                FROM generated_images
-                WHERE batch_id = ?
-            """,
-                (batch_id,),
-            ).fetchone()
-
-            # Get all results
+            # Get all evaluation results
             results = conn.execute(
                 """
-                SELECT prompt_text, image_data, similarity_score, quality_rating, llm_feedback
+                SELECT
+                    prompt_text,
+                    image_data,
+                    similarity_score,
+                    objective_evaluation,
+                    llm_feedback
                 FROM generated_images
                 WHERE batch_id = ?
                 ORDER BY prompt_text, iteration
-            """,
-                (batch_id,),
+                """,
+                (batch_id,)
             ).fetchall()
 
-            evaluation_results = [
-                EvaluationResult(
-                    prompt=r[0],
-                    image_data=r[1],
-                    similarity_score=r[2],
-                    quality_rating=r[3],
-                    feedback=r[4],
-                )
-                for r in results
-            ]
+            # Process results and collect technical issues
+            evaluation_results = []
+            all_issues = []
 
-            # Handle case where metrics might be None
-            avg_similarity = metrics[0] if metrics[0] is not None else 0.0
-            rating_dist = (
-                json.loads(metrics[1])
-                if metrics[1]
-                else {
-                    "MEH": 0,
-                    "FAIR": 0,
-                    "OKAY": 0,
-                    "GOOD": 0,
-                    "GREAT": 0,
-                    "EXCELLENT": 0,
-                }
-            )
+            for r in results:
+                try:
+                    objective_eval = json.loads(r[3]) if r[3] else None
+                    if objective_eval and 'technical_issues' in objective_eval:
+                        all_issues.extend(objective_eval['technical_issues'])
+
+                    result = EvaluationResult(
+                        prompt=r[0],
+                        image_data=r[1],
+                        similarity_score=r[2],
+                        objective_evaluation=objective_eval,
+                        feedback=r[4]
+                    )
+                    evaluation_results.append(result)
+                except json.JSONDecodeError as e:
+                    print(f"Error decoding JSON for result: {e}")
+                    continue
+
+            # Calculate averages
+            similarity_scores = [r.similarity_score for r in evaluation_results if r.similarity_score is not None]
+            objective_scores = [r.objective_evaluation.overall_score for r in evaluation_results
+                              if r.objective_evaluation and r.objective_evaluation.overall_score is not None]
+
+            avg_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+            avg_objective = sum(objective_scores) / len(objective_scores) if objective_scores else 0.0
+
+            # Categorize and aggregate issues
+            categorized_issues = aggregate_issues_by_category(all_issues)
 
             batch_metrics = BatchMetrics(
-                avg_similarity_score=avg_similarity, rating_distribution=rating_dist
+                avg_similarity_score=avg_similarity,
+                avg_objective_score=avg_objective,
+                technical_issues_frequency=categorized_issues
             )
 
             return EvaluationResponse(
                 batch_id=batch_id,
                 description=batch[0],
                 timestamp=batch[1],
-                prompts=[p[0] for p in prompts],  # Add prompts to response
+                prompts=list(set(r.prompt for r in evaluation_results)),
                 metrics=batch_metrics,
-                results=evaluation_results,
+                results=evaluation_results
             )
 
     except sqlite3.Error as e:
-        print(f"Database error in get_evaluation_results: {str(e)}")  # Add logging
+        print(f"Database error in get_evaluation_results: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except Exception as e:
-        print(f"Unexpected error in get_evaluation_results: {str(e)}")  # Add logging
+        print(f"Unexpected error in get_evaluation_results: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
 
 @fastapi_app.get("/evaluation_batches")
 async def get_evaluation_batches():
@@ -338,12 +323,15 @@ async def get_evaluation_batches():
 
 
 @fastapi_app.post("/rate_quality")
-async def rate_quality(request: QualityRatingRequest):
-    """Rate the quality of an image based on prompt alignment and technical aspects"""
-    # client = instructor.patch(OpenAI(api_key=os.environ["OPENAI_API_KEY"]))
-    async_client = instructor.apatch(AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"]))
+async def objective_evaluation(request: ObjectiveRatingRequest) -> ObjectiveCriteriaResponse:
+    """Perform detailed objective evaluation of an image against its prompt."""
+    # First, get the structured elements from the prompt
+    elements = await break_down_prompt(request.prompt)
+
+    client = instructor.apatch(AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"]))
+
     try:
-        response = await async_client.chat.completions.create(
+        return await client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
@@ -351,106 +339,38 @@ async def rate_quality(request: QualityRatingRequest):
                     "content": [
                         {
                             "type": "text",
-                            "text": f"""Evaluate this image's quality and alignment with the prompt: "{request.prompt}"\n
+                            "text": f"""Evaluate this image generated from: "{request.prompt}"
 
-                            Rate across these specific criteria:
-                            1. Prompt Alignment (40% of score)
-                               - Are ALL key elements from the prompt present?
-                               - Is the interpretation accurate and faithful?
-                               - Does it capture the mood/style specified?
+                            Required elements to verify:
+                            {[elem for elem in elements.required_elements]}
 
-                            2. Technical Quality (30% of score)
-                               - Composition: Rule of thirds, framing, balance
-                               - Lighting: Proper exposure, contrast, shadows
-                               - Detail: Sharpness, texture quality, resolution
-                               - Color: Palette coherence, saturation, tone
+                            For each element:
+                            1. Is it present in the image?
+                            2. Provide specific details about how well it matches
 
-                            3. Artistic Merit (30% of score)
-                               - Creativity in interpretation
-                               - Visual impact and memorability
-                               - Uniqueness of perspective
-                               - Emotional resonance
+                            Also check for:
+                            1. Technical issues (blur, distortion, anatomy, etc.)
+                            2. Composition issues (balance, cropping, focal point)
+                            3. Style consistency with prompt
 
-                            Choose ONE rating based on these strict criteria:
-
-                            EXCELLENT (95-100%):
-                            - Perfect prompt alignment with every element present
-                            - Masterful technical execution across ALL aspects
-                            - Exceptional artistic vision that elevates the concept
-                            - Zero noticeable flaws or artifacts
-                            - Could be used professionally without modification
-
-                            GREAT (85-94%):
-                            - Nearly complete prompt alignment (90%+ elements)
-                            - Strong technical execution with minor imperfections
-                            - Creative interpretation that adds value
-                            - Very minimal flaws that don't impact overall quality
-                            - Suitable for most professional uses
-
-                            GOOD (75-84%):
-                            - Most prompt elements present (80%+)
-                            - Solid technical quality with some inconsistencies
-                            - Standard but effective interpretation
-                            - Notable minor flaws but generally successful
-                            - Acceptable for casual use
-
-                            OKAY (65-74%):
-                            - Basic prompt alignment (70%+ elements)
-                            - Inconsistent technical quality
-                            - Literal/basic interpretation
-                            - Multiple minor flaws or a few major issues
-                            - Limited usefulness
-
-                            FAIR (50-64%):
-                            - Missing significant prompt elements
-                            - Poor technical execution in multiple areas
-                            - Lacks creative interpretation
-                            - Major flaws that severely impact quality
-                            - Mostly unsuitable for intended use
-
-                            MEH (0-49%):
-                            - Minimal prompt alignment
-                            - Failed technical execution
-                            - No artistic merit
-                            - Fundamental flaws throughout
-                            - Completely unsuitable for any use
-
-                            Score Calculation:
-                            1. Rate each category (Prompt, Technical, Artistic) out of 100
-                            2. Apply weights (40%, 30%, 30%)
-                            3. Sum for final score
-                            4. Map to rating scale above
-
-                            Provide detailed explanation including:
-                            1. Specific scores for each category
-                            2. Key strengths and weaknesses
-                            3. Missing prompt elements
-                            4. Technical issues
-                            5. Artistic assessment
-                            6. Final weighted score
-                            7. Resulting rating
-                            """,
+                            Be specific and critical. Cite concrete examples.
+                            Score overall quality from 0.0 to 1.0."""
                         },
                         {
                             "type": "image_url",
                             "image_url": {
                                 "url": f"data:image/jpeg;base64,{request.image_data}"
-                            },
-                        },
-                    ],
+                            }
+                        }
+                    ]
                 }
             ],
-            response_model=QualityRatingResponse,
-            max_tokens=500,
+            response_model=ObjectiveCriteriaResponse,
+            max_tokens=1000
         )
 
-        return {
-            "quality_rating": response.quality_rating.value,
-            "explanation": response.explanation,
-        }
-
     except Exception as e:
-        print(f"Quality rating error: {str(e)}")
+        print(f"Objective evaluation error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -593,36 +513,30 @@ async def process_single_iteration(
             similarity_task = analyze_image_similarity(
                 ImageSimilarityRequest(prompt=prompt, image_data=image_data)
             )
-            quality_task = rate_quality(
-                QualityRatingRequest(prompt=prompt, image_data=image_data)
+
+
+            objective_task = objective_evaluation(
+                ObjectiveRatingRequest(prompt=prompt, image_data=image_data)
             )
+
+            # quality_task = rate_quality(
+            #     QualityRatingRequest(prompt=prompt, image_data=image_data)
+            # )
             description_task = describe_image(
                 ImageDescriptionRequest(image_data=image_data)
             )
 
             # Wait for all tasks to complete
-            similarity_response, quality_response, description_response = (
-                await asyncio.gather(similarity_task, quality_task, description_task)
+            similarity_response, objective_response, description_response = (
+                await asyncio.gather(similarity_task, objective_task, description_task)
             )
-            # print(similarity_response)
-            # print(quality_response)
-            # print(description_response)
-            # print(
-            #     EvaluationResult(
-            #         prompt=prompt,
-            #         image_data=image_data,
-            #         similarity_score=similarity_response["similarity_score"],
-            #         quality_rating=quality_response["quality_rating"],
-            #         feedback=description_response["image_description"],
-            #     )
-            # )
 
             # Create result object
             return EvaluationResult(
                 prompt=prompt,
                 image_data=image_data,
                 similarity_score=similarity_response["similarity_score"],
-                quality_rating=quality_response["quality_rating"],
+                objective_evaluation=objective_response,
                 feedback=description_response["image_description"],
             )
 
@@ -645,7 +559,7 @@ def write_results_to_db(batch_id: str, results: List[EvaluationResult]):
                     """
                     INSERT INTO generated_images
                     (image_id, batch_id, prompt_id, prompt_text, image_data, iteration,
-                     similarity_score, quality_rating, llm_feedback)
+                     similarity_score, objective_evaluation, llm_feedback)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
@@ -656,7 +570,7 @@ def write_results_to_db(batch_id: str, results: List[EvaluationResult]):
                         result.image_data,
                         0,  # Replace with the iteration index if you have it
                         result.similarity_score,
-                        result.quality_rating,
+                        json.dumps(result.objective_evaluation.dict()),
                         result.feedback,
                     ),
                 )
@@ -674,35 +588,46 @@ def calculate_metrics(batch_id: str) -> BatchMetrics:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
 
-            # Average similarity score
             cursor = conn.execute(
                 """
-                SELECT AVG(similarity_score) as avg_similarity
+                SELECT
+                    AVG(similarity_score) as avg_similarity,
+                    AVG(CAST(json_extract(objective_evaluation, '$.overall_score') AS FLOAT)) as avg_objective_score
                 FROM generated_images
                 WHERE batch_id = ?
                 """,
                 (batch_id,),
             )
-            avg_similarity = cursor.fetchone()["avg_similarity"] or 0.0
+            row = cursor.fetchone()
+            avg_similarity = row["avg_similarity"] or 0.0
+            avg_objective = row["avg_objective_score"] or 0.0
 
-            # Quality rating distribution
+            # Extract technical issues distribution
             cursor = conn.execute(
                 """
-                SELECT quality_rating, COUNT(*) as count
+                SELECT objective_evaluation
                 FROM generated_images
-                WHERE batch_id = ?
-                GROUP BY quality_rating
+                WHERE batch_id = ? AND objective_evaluation IS NOT NULL
                 """,
-                (batch_id,),
+                (batch_id,)
             )
-            rating_counts = cursor.fetchall()
-            rating_distribution = {
-                row["quality_rating"]: row["count"] for row in rating_counts
-            }
+            issue_counts = {}
+            for row in cursor:
+                try:
+                    eval_data = json.loads(row["objective_evaluation"])
+                    if "technical_issues" in eval_data and isinstance(eval_data["technical_issues"], list):
+                        for issue in eval_data["technical_issues"]:
+                            # Normalize issue text to prevent duplicate categories
+                            normalized_issue = issue.strip().lower()
+                            issue_counts[normalized_issue] = issue_counts.get(normalized_issue, 0) + 1
+                except (json.JSONDecodeError, KeyError) as e:
+                    print(f"Error processing technical issues: {e}")
+                    continue
 
         return BatchMetrics(
             avg_similarity_score=avg_similarity,
-            rating_distribution=rating_distribution,
+            avg_objective_score=avg_objective,
+            technical_issues_frequency=issue_counts
         )
     except Exception as e:
         print(f"Metric calculation error: {str(e)}")
