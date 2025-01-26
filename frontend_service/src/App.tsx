@@ -29,7 +29,7 @@ import {
 
 interface EvaluationResult {
   prompt: string;
-  image_url: string;
+  image_data: string; // base64 encoded image string
   similarity_score: number;
   quality_rating: string;
   feedback: string;
@@ -261,7 +261,7 @@ function EvaluationVisualization() {
                     <Card key={index}>
                       <CardContent className="p-4">
                         <img
-                          src={result.image_url}
+                          src={`data:image/jpeg;base64,${result.image_data}`}
                           alt={`Generated image ${index + 1}`}
                           className="w-full h-48 object-cover rounded mb-2"
                         />
@@ -299,6 +299,7 @@ function EvaluationVisualization() {
 }
 
 export default EvaluationVisualization;
+
 // import { useState, useEffect } from "react";
 // import { useToast } from "@/hooks/use-toast";
 // import {
@@ -327,7 +328,7 @@ export default EvaluationVisualization;
 //   LineChart,
 //   Line,
 // } from "recharts";
-//
+
 // interface EvaluationResult {
 //   prompt: string;
 //   image_url: string;
@@ -335,27 +336,28 @@ export default EvaluationVisualization;
 //   quality_rating: string;
 //   feedback: string;
 // }
-//
+
 // interface BatchMetrics {
 //   avg_similarity_score: number;
 //   rating_distribution: { [key: string]: number };
 // }
-//
+
 // interface BatchListItem {
 //   batch_id: string;
 //   description?: string;
 //   timestamp: string;
 //   image_count: number;
 // }
-//
+
 // interface EvaluationResponse {
 //   batch_id: string;
 //   description?: string;
 //   timestamp: string;
+//   prompts: string[];
 //   metrics: BatchMetrics;
 //   results: EvaluationResult[];
 // }
-//
+
 // function EvaluationVisualization() {
 //   const [batches, setBatches] = useState<BatchListItem[]>([]);
 //   const [selectedBatch, setSelectedBatch] = useState<EvaluationResponse | null>(
@@ -363,11 +365,11 @@ export default EvaluationVisualization;
 //   );
 //   const { toast } = useToast();
 //   const modalUrl = import.meta.env.VITE_MODAL_URL;
-//
+
 //   useEffect(() => {
 //     fetchBatches();
 //   }, []);
-//
+
 //   const fetchBatches = async () => {
 //     try {
 //       const response = await fetch(`${modalUrl}/evaluation_batches`);
@@ -384,7 +386,7 @@ export default EvaluationVisualization;
 //       });
 //     }
 //   };
-//
+
 //   const fetchBatchDetails = async (batchId: string) => {
 //     try {
 //       const response = await fetch(`${modalUrl}/evaluation/${batchId}`);
@@ -402,14 +404,14 @@ export default EvaluationVisualization;
 //       });
 //     }
 //   };
-//
+
 //   const formatDistributionData = (distribution: { [key: string]: number }) => {
 //     return Object.entries(distribution).map(([rating, count]) => ({
 //       rating,
 //       count,
 //     }));
 //   };
-//
+
 //   const formatSimilarityData = (results: EvaluationResult[]) => {
 //     return results.map((result, index) => ({
 //       index: index + 1,
@@ -417,7 +419,7 @@ export default EvaluationVisualization;
 //       prompt: result.prompt,
 //     }));
 //   };
-//
+
 //   return (
 //     <div className="container mx-auto p-4 space-y-6">
 //       <Card>
@@ -443,7 +445,7 @@ export default EvaluationVisualization;
 //           </Select>
 //         </CardContent>
 //       </Card>
-//
+
 //       {selectedBatch && (
 //         <Card>
 //           <CardHeader>
@@ -460,10 +462,34 @@ export default EvaluationVisualization;
 //             <Tabs defaultValue="overview">
 //               <TabsList>
 //                 <TabsTrigger value="overview">Overview</TabsTrigger>
+//                 <TabsTrigger value="prompts">Prompts</TabsTrigger>
 //                 <TabsTrigger value="metrics">Detailed Metrics</TabsTrigger>
 //                 <TabsTrigger value="gallery">Image Gallery</TabsTrigger>
 //               </TabsList>
-//
+
+//               <TabsContent value="prompts">
+//                 <Card>
+//                   <CardHeader>
+//                     <CardTitle>Evaluation Prompts</CardTitle>
+//                     <CardDescription>
+//                       Prompts used in this evaluation batch
+//                     </CardDescription>
+//                   </CardHeader>
+//                   <CardContent>
+//                     <div className="space-y-2">
+//                       {selectedBatch.prompts.map((prompt, index) => (
+//                         <div
+//                           key={index}
+//                           className="p-4 rounded-lg bg-secondary"
+//                         >
+//                           <p className="font-mono text-sm">{prompt}</p>
+//                         </div>
+//                       ))}
+//                     </div>
+//                   </CardContent>
+//                 </Card>
+//               </TabsContent>
+
 //               <TabsContent value="overview">
 //                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 //                   <Card>
@@ -476,7 +502,7 @@ export default EvaluationVisualization;
 //                       </div>
 //                     </CardContent>
 //                   </Card>
-//
+
 //                   <Card>
 //                     <CardHeader>
 //                       <CardTitle>Quality Distribution</CardTitle>
@@ -501,7 +527,7 @@ export default EvaluationVisualization;
 //                   </Card>
 //                 </div>
 //               </TabsContent>
-//
+
 //               <TabsContent value="metrics">
 //                 <div className="space-y-6">
 //                   <Card>
@@ -530,7 +556,7 @@ export default EvaluationVisualization;
 //                   </Card>
 //                 </div>
 //               </TabsContent>
-//
+
 //               <TabsContent value="gallery">
 //                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 //                   {selectedBatch.results.map((result, index) => (
@@ -573,5 +599,5 @@ export default EvaluationVisualization;
 //     </div>
 //   );
 // }
-//
+
 // export default EvaluationVisualization;

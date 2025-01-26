@@ -138,8 +138,10 @@ def get_or_create_prompt_ids(conn, prompts):
                 "INSERT INTO test_prompts (prompt_id, prompt_text) VALUES (?, ?)",
                 (new_id, prompt),
             )
+            conn.commit()
             prompt_map[prompt] = new_id
 
+    conn.close()
     return prompt_map
 
 
@@ -151,12 +153,15 @@ async def run_evaluation(request: EvaluationRequest):
         timestamp = datetime.now()
 
         # Create batch record
+        volume.reload()
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO evaluation_batches (batch_id, timestamp, description) VALUES (?, ?, ?)",
                 (batch_id, timestamp, request.description),
             )
+            conn.commit()
 
+        volume.commit()
         prompts = (
             request.custom_prompts if request.custom_prompts else DEFAULT_TEST_PROMPTS
         )
@@ -455,7 +460,7 @@ async def generate_image(request: ImageGenerationRequest):
     async_client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
     try:
         response = await async_client.images.generate(
-            model="dall-e-3",
+            model="dall-e-2",
             prompt=request.prompt,
             size="1024x1024",
             quality="standard",
@@ -599,18 +604,18 @@ async def process_single_iteration(
             similarity_response, quality_response, description_response = (
                 await asyncio.gather(similarity_task, quality_task, description_task)
             )
-            print(similarity_response)
-            print(quality_response)
-            print(description_response)
-            print(
-                EvaluationResult(
-                    prompt=prompt,
-                    image_data=image_data,
-                    similarity_score=similarity_response["similarity_score"],
-                    quality_rating=quality_response["quality_rating"],
-                    feedback=description_response["image_description"],
-                )
-            )
+            # print(similarity_response)
+            # print(quality_response)
+            # print(description_response)
+            # print(
+            #     EvaluationResult(
+            #         prompt=prompt,
+            #         image_data=image_data,
+            #         similarity_score=similarity_response["similarity_score"],
+            #         quality_rating=quality_response["quality_rating"],
+            #         feedback=description_response["image_description"],
+            #     )
+            # )
 
             # Create result object
             return EvaluationResult(
