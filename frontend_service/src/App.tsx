@@ -17,8 +17,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TechnicalIssuesChart from "@/components/TechnicalIssuesChart";
 import {
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -126,13 +124,6 @@ function EvaluationVisualization() {
         description: "Failed to fetch batch details",
       });
     }
-  };
-
-  const formatDistributionData = (distribution: { [key: string]: number }) => {
-    return Object.entries(distribution).map(([rating, count]) => ({
-      rating,
-      count,
-    }));
   };
 
   const formatSimilarityData = (results: EvaluationResult[]) => {
@@ -257,29 +248,6 @@ function EvaluationVisualization() {
                       />
                     </CardContent>
                   </Card>
-
-                  {/* <Card>
-                    <CardHeader>
-                      <CardTitle>Technical Issues</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-48">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            data={Object.entries(
-                              selectedBatch.metrics.technical_issues_frequency,
-                            ).map(([issue, count]) => ({ issue, count }))}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="issue" />
-                            <YAxis />
-                            <Tooltip />
-                            <Bar dataKey="count" fill="#8884d8" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </CardContent>
-                  </Card> */}
                 </div>
               </TabsContent>
 

@@ -142,7 +142,7 @@ async def run_evaluation(request: EvaluationRequest):
             prompt_id = prompt_map[prompt]
             for iteration in range(request.num_iterations):
                 task = process_single_iteration(
-                    prompt, prompt_id, batch_id, iteration, DB_PATH
+                    prompt, prompt_id, batch_id, iteration
                 )
                 tasks.append(task)
 
@@ -197,7 +197,8 @@ async def get_evaluation_results(batch_id: str):
                     image_data,
                     similarity_score,
                     objective_evaluation,
-                    llm_feedback
+                    llm_feedback,
+                    prompt_id,
                 FROM generated_images
                 WHERE batch_id = ?
                 ORDER BY prompt_text, iteration
@@ -220,7 +221,8 @@ async def get_evaluation_results(batch_id: str):
                         image_data=r[1],
                         similarity_score=r[2],
                         objective_evaluation=objective_eval,
-                        feedback=r[4]
+                        feedback=r[4],
+                        prompt_id=r[5]
                     )
                     evaluation_results.append(result)
                 except json.JSONDecodeError as e:
@@ -468,7 +470,7 @@ def read_root():
 
 
 async def process_single_iteration(
-    prompt: str, prompt_id: str, batch_id: str, iteration: int, db_path
+    prompt: str, prompt_id: str, batch_id: str, iteration: int
 ) -> EvaluationResult | None:
     """Process a single iteration of image generation and evaluation"""
     async with asyncio.Semaphore(25):
@@ -499,6 +501,7 @@ async def process_single_iteration(
             # Create result object
             return EvaluationResult(
                 prompt=prompt,
+                prompt_id=prompt_id,
                 image_data=image_data,
                 similarity_score=similarity_response["similarity_score"],
                 objective_evaluation=objective_response,

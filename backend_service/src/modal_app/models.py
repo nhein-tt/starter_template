@@ -60,6 +60,7 @@ class EvaluationRequest(BaseModel):
 class EvaluationResult(BaseModel):
     """Individual evaluation result"""
     prompt: str
+    prompt_id: str
     image_data: str
     similarity_score: float
     objective_evaluation: ObjectiveCriteriaResponse

@@ -109,7 +109,7 @@ def write_results_to_db(batch_id: str, results: List[EvaluationResult]):
                     (
                         str(uuid.uuid4()),
                         batch_id,
-                        str(uuid.uuid4()),  # Use a unique prompt_id for now
+                        result.prompt_id,
                         result.prompt,
                         result.image_data,
                         0,  # Replace with the iteration index if you have it
