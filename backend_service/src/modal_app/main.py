@@ -198,7 +198,7 @@ async def get_evaluation_results(batch_id: str):
                     similarity_score,
                     objective_evaluation,
                     llm_feedback,
-                    prompt_id,
+                    prompt_id
                 FROM generated_images
                 WHERE batch_id = ?
                 ORDER BY prompt_text, iteration
