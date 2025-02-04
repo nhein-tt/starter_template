@@ -2,6 +2,7 @@ import sqlite3
 from typing_extensions import Union
 
 from modal import asgi_app
+from openai import OpenAI
 
 from .common import DB_PATH, VOLUME_DIR, app, fastapi_app, volume
 from .agent import process_agent_message
@@ -69,10 +70,12 @@ def fastapi_entrypoint():
 
 @fastapi_app.post("/agent/chat", response_model=AgentResponse)
 async def agent_chat(request: AgentRequest):
+    volume.reload()
     try:
         result = process_agent_message(request.message)
         return {"response": result}
     except Exception as e:
+        print(str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @fastapi_app.post("/auth/google/token")
@@ -124,6 +127,58 @@ def receive_token(token_data: TokenData):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@fastapi_app.delete("/agent/thread")
+def delete_agent_thread():
+    """
+    Delete the stored agent thread from the SQLite database.
+    This will force the next agent request to create a new thread.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM agent_threads")
+        conn.commit()
+        conn.close()
+        volume.commit()
+        return {"message": "Agent thread deleted successfully."}
+    except Exception as e:
+        print(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@fastapi_app.get("/agent/history")
+def get_agent_history():
+    """
+    Retrieve the entire chat history for the current agent thread.
+    """
+    try:
+        # Retrieve the current thread ID from the agent_threads table.
+        client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT thread_id FROM agent_threads ORDER BY updated_at DESC LIMIT 1")
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return {"messages": []}
+        thread_id = row[0]
+
+        # Use the OpenAI Assistants API to list messages from the thread.
+        messages = client.beta.threads.messages.list(
+            thread_id=thread_id,
+            order="asc"
+        )
+        chat_history = []
+        if messages.data:
+            for m in messages.data:
+                # Assume that each message contains at least one text element.
+                role = m.role
+                # Adjust this line based on your SDK's response structure.
+                text = m.content[0].text.value if m.content and m.content[0].text.value else ""
+                chat_history.append({"role": role, "text": text})
+        return {"messages": chat_history}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @fastapi_app.get("/")
 def read_root():

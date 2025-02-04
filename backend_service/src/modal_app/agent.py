@@ -53,11 +53,10 @@ def process_agent_message(user_message: str) -> str:
         name="GoogleEA",
         instructions=CODE_PROMPT,
         tools=[
-            {"type": "code_interpreter"},
             {"type": "function", "function": functions[0]},  # schedule_meeting
             {"type": "function", "function": functions[1]},  # send_email
         ],
-        model="o3-mini",
+        model="gpt-4o",
     )
 
     # Add the user's message to the thread.
