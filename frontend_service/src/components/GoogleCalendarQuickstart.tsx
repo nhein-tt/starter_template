@@ -6,12 +6,13 @@ const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY as string;
 const DISCOVERY_DOC = import.meta.env
   .VITE_GOOGLE_DISCOVERY_DOC_CALENDAR as string;
+const SCOPES = import.meta.env.VITE_GOOGLE_SCOPES as string;
 // const SCOPES = [
 //   "https://www.googleapis.com/auth/calendar",
 //   "https://www.googleapis.com/auth/gmail.modify",
 // ];
-const SCOPES =
-  "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.modify";
+// const SCOPES =
+//   "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.modify";
 
 declare global {
   interface Window {
@@ -26,8 +27,13 @@ const GoogleCalendarQuickstart: React.FC = () => {
   const [tokenClient, setTokenClient] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [authorized, setAuthorized] = useState(false);
+  const [googleTokens, setGoogleTokens] = useState<{
+    access_token: string;
+    refresh_token: string;
+    token_expiry: string;
+  } | null>(null);
 
-  // Load the gapi and google identity scripts once on mount.
+  // Load gapi and Google Identity Services scripts
   useEffect(() => {
     // Load gapi script
     const gapiScript = document.createElement("script");
@@ -39,7 +45,7 @@ const GoogleCalendarQuickstart: React.FC = () => {
     };
     document.body.appendChild(gapiScript);
 
-    // Load google identity services script
+    // Load Google Identity Services script
     const gisScript = document.createElement("script");
     gisScript.src = "https://accounts.google.com/gsi/client";
     gisScript.async = true;
@@ -65,7 +71,7 @@ const GoogleCalendarQuickstart: React.FC = () => {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: CLIENT_ID,
       scope: SCOPES,
-      callback: "", // will be set on auth click
+      callback: "", // callback will be set on auth click
     });
     setTokenClient(client);
     setGisLoaded(true);
@@ -73,8 +79,6 @@ const GoogleCalendarQuickstart: React.FC = () => {
   };
 
   const maybeEnableButtons = () => {
-    // You might choose to enable the authorize button only if both libraries are loaded.
-    // (In this example, the button is always rendered; its click handler will do nothing until ready.)
     if (gapiLoaded && gisLoaded) {
       console.log("Both GAPI and GIS libraries are loaded");
     }
@@ -90,26 +94,27 @@ const GoogleCalendarQuickstart: React.FC = () => {
         console.error("Error during token callback:", resp);
         return;
       }
-      await fetch(`${import.meta.env.VITE_MODAL_URL}/auth/google/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: authCode }),
-      });
-      // This will show events if you uncomment it
-      // setAuthorized(true);
-      // await listUpcomingEvents();
+      // We now receive an authorization code from the response.
+      const accessToken = resp.access_token;
+      try {
+        // Send the code to your backend so it can exchange it for tokens.
+        const tokenResponse = await fetch(
+          `${import.meta.env.VITE_MODAL_URL}/auth/google/token`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ access_token: accessToken }),
+          },
+        );
+        const tokens = await tokenResponse.json();
+        setGoogleTokens(tokens);
+        setAuthorized(true);
+        await listUpcomingEvents();
+      } catch (err) {
+        console.error("Error exchanging code:", err);
+      }
     };
-
-    // If no token is present, prompt for consent; otherwise, refresh silently.
-    // if (!window.gapi.client.getToken()) {
-    //   tokenClient.requestAccessToken({ prompt: "consent" });
-    // } else {
-    //   tokenClient.requestAccessToken({ prompt: "" });
-    // }
-    tokenClient.requestAccessToken({
-      prompt: "consent",
-      code_challenge_method: "S256",
-    });
+    tokenClient.requestAccessToken({ prompt: "consent" });
   };
 
   const handleSignoutClick = () => {
@@ -119,6 +124,7 @@ const GoogleCalendarQuickstart: React.FC = () => {
       window.gapi.client.setToken("");
       setAuthorized(false);
       setEvents([]);
+      setGoogleTokens(null);
     }
   };
 
@@ -178,6 +184,20 @@ const GoogleCalendarQuickstart: React.FC = () => {
           <p>No events found.</p>
         )}
       </div>
+      {googleTokens && (
+        <div className="mt-4 p-4 border rounded">
+          <h3 className="font-bold mb-2">Token Information (for testing)</h3>
+          <p>
+            <strong>Access Token:</strong> {googleTokens.access_token}
+          </p>
+          <p>
+            <strong>Refresh Token:</strong> {googleTokens.refresh_token}
+          </p>
+          <p>
+            <strong>Token Expiry:</strong> {googleTokens.token_expiry}
+          </p>
+        </div>
+      )}
     </div>
   );
 };
