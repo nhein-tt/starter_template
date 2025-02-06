@@ -55,6 +55,9 @@ def process_agent_message(user_message: str) -> str:
         tools=[
             {"type": "function", "function": functions[0]},  # schedule_meeting
             {"type": "function", "function": functions[1]},  # send_email
+            {"type": "function", "function": functions[2]},  # read_emails
+            {"type": "function", "function": functions[3]},  # read_calendar
+            {"type": "function", "function": functions[4]},  # edit_calendar
         ],
         model="gpt-4o",
     )
